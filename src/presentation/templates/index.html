@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>File Downloader</title>
+</head>
+<body>
+    <h1>File Downloader</h1>
+    <button onclick="startDownload()">Start Download</button>
+    <div id="status"></div>
+
+    <script>
+        async function startDownload() {
+            const resp = await fetch('/api/download/start', {method: 'POST'});
+            const data = await resp.json();
+            document.getElementById('status').innerText = 'Task ID: ' + data.task_id;
+            pollStatus(data.task_id);
+        }
+
+        async function pollStatus(taskId) {
+            while (true) {
+                const resp = await fetch('/api/download/status/' + taskId);
+                const data = await resp.json();
+                document.getElementById('status').innerText = JSON.stringify(data);
+                if (data.status === 'completed' || data.status === 'failed') break;
+                await new Promise(r => setTimeout(r, 2000));
+            }
+        }
+    </script>
+</body>
+</html>

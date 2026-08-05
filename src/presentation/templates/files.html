@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <title>Скачанные файлы и расчёты</title>
+    <style>
+        table, th, td { border: 1px solid black; border-collapse: collapse; padding: 4px; }
+        .pagination { margin: 10px 0; }
+        .stats { margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>Скачанные файлы</h1>
+    <nav><a href="/">← На страницу скачивания</a></nav>
+
+    <div id="controls">
+        <button id="selectAllPage">Выбрать всё на странице</button>
+        <button id="selectAllFiles">Выбрать вообще все файлы</button>
+        <button id="calculateBtn">Произвести расчёты</button>
+    </div>
+
+    <table id="filesTable">
+        <thead><tr><th>Выбрать</th><th>Имя файла</th><th>Время скачивания</th></tr></thead>
+        <tbody></tbody>
+    </table>
+
+    <div class="pagination">
+        <button id="prevPage" disabled>← Назад</button>
+        <span id="pageInfo"></span>
+        <button id="nextPage">Вперёд →</button>
+    </div>
+
+    <div class="stats" id="statsContainer" style="display:none;">
+        <h2>Результаты расчётов</h2>
+        <div id="globalStats"></div>
+        <div id="perFileStats"></div>
+    </div>
+
+    <script>
+        let currentPage = 1;
+        let totalPages = 1;
+        let allFileIds = [];
+        let selectedMode = "page";
+
+        async function loadFiles(page) {
+            const resp = await fetch(`/api/files?page=${page}`);
+            const files = await resp.json();
+            const tbody = document.querySelector("#filesTable tbody");
+            tbody.innerHTML = "";
+            allFileIds = files.map(f => f.id);
+            files.forEach(f => {
+                const row = tbody.insertRow();
+                row.innerHTML = `
+                    <td><input type="checkbox" class="file-checkbox" data-id="${f.id}"></td>
+                    <td>${f.name}</td>
+                    <td>${f.downloaded_at ? new Date(f.downloaded_at).toLocaleString() : ""}</td>
+                `;
+            });
+
+            const countResp = await fetch("/api/files/count");
+            const { total } = await countResp.json();
+            totalPages = Math.ceil(total / 10) || 1;
+            document.getElementById("pageInfo").textContent = `Страница ${currentPage} из ${totalPages}`;
+            document.getElementById("prevPage").disabled = currentPage <= 1;
+            document.getElementById("nextPage").disabled = currentPage >= totalPages;
+
+            selectedMode = "page";
+        }
+
+        function getSelectedIds() {
+            if (selectedMode === "all") {
+                return getAllFileIds();
+            } else {
+                const checkboxes = document.querySelectorAll(".file-checkbox:checked");
+                return Array.from(checkboxes).map(cb => parseInt(cb.dataset.id));
+            }
+        }
+
+        async function getAllFileIds() {
+            const countResp = await fetch("/api/files/count");
+            const { total } = await countResp.json();
+            const pages = Math.ceil(total / 10);
+            let ids = [];
+            for (let p = 1; p <= pages; p++) {
+                const resp = await fetch(`/api/files?page=${p}`);
+                const files = await resp.json();
+                ids.push(...files.map(f => f.id));
+            }
+            return ids;
+        }
+
+        document.getElementById("prevPage").addEventListener("click", () => {
+            if (currentPage > 1) { currentPage--; loadFiles(currentPage); }
+        });
+        document.getElementById("nextPage").addEventListener("click", () => {
+            if (currentPage < totalPages) { currentPage++; loadFiles(currentPage); }
+        });
+
+        document.getElementById("selectAllPage").addEventListener("click", () => {
+            const checkboxes = document.querySelectorAll(".file-checkbox");
+            checkboxes.forEach(cb => cb.checked = true);
+            selectedMode = "page";
+        });
+
+        document.getElementById("selectAllFiles").addEventListener("click", () => {
+            const checkboxes = document.querySelectorAll(".file-checkbox");
+            checkboxes.forEach(cb => cb.checked = true);
+            selectedMode = "all";
+            alert("Будут выбраны все скачанные файлы (со всех страниц)");
+        });
+
+        document.getElementById("calculateBtn").addEventListener("click", async () => {
+            const ids = await getSelectedIds();
+            if (ids.length === 0) {
+                alert("Выберите хотя бы один файл");
+                return;
+            }
+            const resp = await fetch("/api/stats", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({file_ids: ids})
+            });
+            if (!resp.ok) {
+                alert("Ошибка при расчёте статистики");
+                return;
+            }
+            const stats = await resp.json();
+            displayStats(stats);
+        });
+
+        function displayStats(stats) {
+            const global = stats.global_stats;
+            const perFile = stats.per_file_stats;
+            let globalHtml = "<h3>Общая статистика</h3><ul>";
+            for (const [digit, count] of Object.entries(global)) {
+                globalHtml += `<li>Цифра ${digit}: ${count}</li>`;
+            }
+            globalHtml += "</ul>";
+
+            let perFileHtml = "<h3>Статистика по файлам</h3>";
+            for (const [filename, counters] of Object.entries(perFile)) {
+                perFileHtml += `<h4>${filename}</h4><ul>`;
+                for (const [digit, count] of Object.entries(counters)) {
+                    perFileHtml += `<li>Цифра ${digit}: ${count}</li>`;
+                }
+                perFileHtml += "</ul>";
+            }
+
+            document.getElementById("globalStats").innerHTML = globalHtml;
+            document.getElementById("perFileStats").innerHTML = perFileHtml;
+            document.getElementById("statsContainer").style.display = "block";
+        }
+
+        loadFiles(1);
+    </script>
+</body>
+</html>
