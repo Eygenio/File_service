@@ -21,7 +21,10 @@ class FileRepository(IFileRepository):
         )
 
     async def add_or_update(self, record: FileRecord) -> FileRecord:
-        orm = await self._session.get(FileRecordOrm, record.id)
+        statement = select(FileRecordOrm).where(FileRecordOrm.name == record.name)
+        result = await self._session.execute(statement)
+        orm = result.scalars().first()
+
         if orm is None:
             orm = FileRecordOrm(
                 name=record.name,

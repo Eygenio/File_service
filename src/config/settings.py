@@ -18,10 +18,10 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app: AppConfig = Field(default_factory=AppConfig)
-    db: DatabaseConfig = Field(default_factory=DatabaseConfig)
-    broker: BrokerConfig = Field(default_factory=BrokerConfig)
-    external_api_base_url: str = "http://external-api:8000"
+    app: AppConfig = Field(default_factory=AppConfig)  # type: ignore[arg-type]
+    db: DatabaseConfig = Field(default_factory=DatabaseConfig)  # type: ignore[arg-type]
+    broker: BrokerConfig = Field(default_factory=BrokerConfig)  # type: ignore[arg-type]
+    external_api_base_url: str
 
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)

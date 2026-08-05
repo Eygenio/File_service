@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import datetime, timedelta, timezone
 
 from celery import Task
 
@@ -13,17 +13,23 @@ from src.infrastructure.unit_of_work import UnitOfWork
 
 logger = logging.getLogger(__name__)
 
+NSK_TZ = timezone(timedelta(hours=7))
+
 
 @celery.task(bind=True)
 def download_task(self: Task) -> dict:
-    start_time = datetime.now(UTC)
+    start_time_nsk = datetime.now(NSK_TZ)
     self.update_state(
         state=TASK_STATE_PROGRESS,
-        meta={"received": 0, "downloaded": 0, "start_time": start_time.isoformat()},
+        meta={"received": 0, "downloaded": 0, "start_time": start_time_nsk.isoformat()},
     )
-    result = asyncio.run(_run_download(self, start_time))
-
-    return {"files_downloaded": result, "start_time": start_time.isoformat()}
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        result = loop.run_until_complete(_run_download(self, start_time_nsk))
+    finally:
+        loop.close()
+    return {"files_downloaded": result, "start_time": start_time_nsk.isoformat()}
 
 
 async def _run_download(task: Task, start_time: datetime) -> int:

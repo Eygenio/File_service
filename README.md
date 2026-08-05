@@ -111,7 +111,7 @@ DB__DRIVER_NAME=postgresql+asyncpg
 BROKER__URL=redis://redis:6379/0
 BROKER__RESULT_BACKEND=redis://redis:6379/0
 
-EXTERNAL_API_BASE_URL=http://external-api:8000
+EXTERNAL_API_BASE_URL=http://91.199.149.128:18001
 
 ```
 

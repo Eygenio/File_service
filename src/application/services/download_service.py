@@ -1,7 +1,7 @@
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import datetime
 
 from src.application.constants import MAX_DOWNLOADS_PER_REQUEST
 from src.domain.entities import FileRecord
@@ -18,7 +18,10 @@ class DownloadService:
         self.uow = uow
         self.candidate_id = candidate_id
 
-    async def run(self, progress_callback: ProgressCallback | None = None) -> None:
+    async def run(
+        self,
+        progress_callback: ProgressCallback | None = None,
+    ) -> None:
         async with FileApiClient(self.candidate_id) as client:
             while True:
                 names = await client.get_file_names()
@@ -37,7 +40,7 @@ class DownloadService:
                         record = FileRecord(
                             name=name,
                             content=content,
-                            downloaded_at=datetime.now(UTC),
+                            downloaded_at=datetime.utcnow(),
                             is_downloaded=True,
                         )
                         await self.uow.files.add_or_update(record)
@@ -53,4 +56,4 @@ class DownloadService:
                         downloaded,
                         total,
                     )
-                    await asyncio.sleep(1)
+                    await asyncio.sleep(2)

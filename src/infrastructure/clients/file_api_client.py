@@ -5,6 +5,7 @@ from typing import Any
 from zipfile import ZipFile
 
 import aiohttp
+from aiohttp.client_exceptions import ClientConnectionError
 from fastapi import status
 
 from src.application.constants import GET, POST
@@ -25,47 +26,99 @@ class FileApiClient:
         self._headers = {"X-Candidate-Id": candidate_id}
 
     async def __aenter__(self) -> "FileApiClient":
-        self._session = aiohttp.ClientSession(headers=self._headers)
+        timeout = aiohttp.ClientTimeout(total=60)
+        self._session = aiohttp.ClientSession(
+            headers=self._headers,
+            timeout=timeout,
+        )
         return self
 
     async def __aexit__(self, *args: Any) -> None:
         if self._session:
             await self._session.close()
 
-    async def _request_with_retry(self, method: str, url: str, **kwargs: Any) -> Any:
-        while True:
-            async with self._session.request(method, url, **kwargs) as response:  # type: ignore[union-attr]
+    async def _request(
+        self,
+        method: str,
+        url: str,
+        **kwargs: Any,
+    ) -> aiohttp.ClientResponse:
+        assert self._session is not None
+        max_attempts = 5
+        for attempt in range(1, max_attempts + 1):
+            try:
+                response = await self._session.request(method, url, **kwargs)
                 if response.status == status.HTTP_429_TOO_MANY_REQUESTS:
                     retry_after = int(response.headers.get("Retry-After", 5))
-                    logger.warning("Rate limited, retrying after %d seconds", retry_after)
+                    logger.warning(
+                        "Rate limited, retrying after %d seconds",
+                        retry_after,
+                    )
                     await asyncio.sleep(retry_after)
                     continue
                 if response.status == status.HTTP_403_FORBIDDEN:
                     retry_after = int(response.headers.get("Retry-After", 1800))
-                    logger.error("Banned for %d seconds", retry_after)
-                    raise Exception(f"Banned for {retry_after} seconds")
+                    logger.warning(
+                        "Banned, waiting %d seconds before retry",
+                        retry_after,
+                    )
+                    await asyncio.sleep(retry_after)
+                    continue
                 return response
+            except (TimeoutError, ClientConnectionError) as e:
+                logger.warning("Request failed on attempt %d: %s", attempt, e)
+                if attempt == max_attempts:
+                    raise
+                await asyncio.sleep(2 ** (attempt - 1))
+        raise RuntimeError("Max retries exceeded")
+
+    async def _request_json(self, method: str, url: str, **kwargs: Any) -> Any:
+        for attempt in range(3):
+            response = await self._request(method, url, **kwargs)
+            try:
+                return await response.json()
+            except (TimeoutError, ClientConnectionError) as e:
+                logger.warning("JSON read failed on attempt %d: %s", attempt + 1, e)
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(2**attempt)
+        raise RuntimeError("Max read retries exceeded")
+
+    async def _request_bytes(self, method: str, url: str, **kwargs: Any) -> bytes:
+        for attempt in range(3):
+            response = await self._request(method, url, **kwargs)
+            try:
+                return await response.read()
+            except (TimeoutError, ClientConnectionError) as e:
+                logger.warning("Bytes read failed on attempt %d: %s", attempt + 1, e)
+                if attempt == 2:
+                    raise
+                await asyncio.sleep(2**attempt)
+        raise RuntimeError("Max read retries exceeded")
 
     async def get_file_names(self) -> list[str]:
-        response = await self._request_with_retry(GET, f"{self._base_url}/api/files/names")
-        data: dict = await response.json()
-        file_names: list[str] = data["file_names"]
-        return file_names
+        data: dict = await self._request_json(GET, f"{self._base_url}/api/files/names")
+        return list(data["file_names"])
 
     async def download_files(self, file_names: list[str]) -> dict[str, str]:
-        response = await self._request_with_retry(
+        zip_bytes = await self._request_bytes(
             POST,
             f"{self._base_url}/api/files/download",
             json={"file_names": file_names},
         )
-        zip_bytes = await response.read()
         return self._extract_zip(zip_bytes)
 
     async def mark_downloaded(self, file_names: list[str]) -> None:
-        await self._request_with_retry(
+        data: dict = await self._request_json(
             POST,
             f"{self._base_url}/api/files/downloaded",
             json={"file_names": file_names},
+        )
+        logger.info(
+            "Successfully marked %d files as downloaded (marked_now=%d, already_marked=%d)",
+            len(file_names),
+            data.get("marked_now", 0),
+            data.get("already_marked", 0),
         )
 
     @staticmethod
